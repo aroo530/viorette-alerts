@@ -4,6 +4,8 @@ const TELEGRAM_CHAT_ID = Deno.env.get("TELEGRAM_CHAT_ID")!;
 
 // Rate limiting: milliseconds between Bosta API calls
 const BOSTA_RATE_LIMIT_MS = 100;
+// Bosta API hard-caps pages at 50 deliveries
+const BOSTA_PAGE_SIZE = 50;
 
 // Telegram message limit (safe margin below 4096)
 const TELEGRAM_MSG_LIMIT = 4000;
@@ -50,12 +52,14 @@ interface DeliveryEntry {
 }
 
 interface BostaSearchResponse {
+  success?: boolean;
+  message?: string;
+  data?: { deliveries?: BostaDelivery[]; count?: number; total?: number };
   list?: BostaDelivery[];
   deliveries?: BostaDelivery[];
-  data?: BostaDelivery[];
-  pageNumber?: number;
-  pageSize?: number;
+  pageLimit?: number;
   total?: number;
+  count?: number;
 }
 
 // State code groups
@@ -69,8 +73,7 @@ const PROBLEMATIC_STATES = new Set([48, 100, 101, 102, 103]);
 
 function cairoDateString(offsetDays = 0): string {
   const d = new Date(Date.now() + offsetDays * 86400000);
-  const cairoTime = d.toLocaleString("en-CA", { timeZone: "Africa/Cairo" });
-  return cairoTime.split(" ")[0];
+  return d.toLocaleDateString("en-CA", { timeZone: "Africa/Cairo" });
 }
 
 function getDateRangeFromOrders(orders: BostaDelivery[]): {
@@ -150,11 +153,11 @@ function formatOrderBlock(tn: string, d: BostaDelivery): string {
 
 async function searchBosta(
   params: Record<string, unknown>,
-  page = 0,
-): Promise<BostaDelivery[]> {
+  page = 1,
+): Promise<{ deliveries: BostaDelivery[]; total: number }> {
   try {
-    const reqBody = { pageNumber: page, pageSize: 100, ...params };
-    const res = await fetch("https://app.bosta.co/api/v0/deliveries/search", {
+    const reqBody = { limit: BOSTA_PAGE_SIZE, page, sortBy: "-updatedAt", ...params };
+    const res = await fetch("https://app.bosta.co/api/v2/deliveries/search", {
       method: "POST",
       headers: {
         Authorization: `${BOSTA_API_KEY}`,
@@ -165,51 +168,47 @@ async function searchBosta(
 
     if (!res.ok) {
       console.error(`[Bosta] HTTP ${res.status} ${res.statusText}`);
-      return [];
+      return { deliveries: [], total: 0 };
     }
 
     const data = (await res.json()) as BostaSearchResponse;
+    const payload = data.data && !Array.isArray(data.data) ? data.data : data;
+    const total = payload.count ?? payload.total ?? data.count ?? data.total ?? 0;
 
-    const deliveries = data.list ?? data.deliveries ?? data.data;
+    const deliveries = payload.deliveries ?? data.list ?? data.deliveries;
     if (!Array.isArray(deliveries)) {
-      console.error(
-        "[Bosta] Invalid response format: no delivery array found",
-        { data },
-      );
-      return [];
+      console.error("[Bosta] Invalid response format: no delivery array found", { data });
+      return { deliveries: [], total };
     }
 
-    console.log(
-      `[Bosta] Page ${page}: fetched ${deliveries.length} deliveries`,
-    );
-    return deliveries;
+    console.log(`[Bosta] Page ${page}: fetched ${deliveries.length} deliveries`);
+    return { deliveries, total };
   } catch (err) {
     console.error(`[Bosta] Request failed:`, err);
-    return [];
+    return { deliveries: [], total: 0 };
   }
 }
 
-async function searchBostaAllPages(
-  params: Record<string, unknown>,
-): Promise<BostaDelivery[]> {
+async function searchBostaAllPages(params: Record<string, unknown>): Promise<BostaDelivery[]> {
   const allDeliveries: BostaDelivery[] = [];
-  let page = 0;
-  const maxPages = 10;
+  let page = 1;
+  const maxPages = 30;
 
-  while (page < maxPages) {
+  while (page <= maxPages) {
     await new Promise((resolve) => setTimeout(resolve, BOSTA_RATE_LIMIT_MS));
-    const batch = await searchBosta(params, page);
+    const { deliveries, total } = await searchBosta(params, page);
 
-    if (batch.length === 0) break;
-    allDeliveries.push(...batch);
+    if (deliveries.length === 0) break;
+    allDeliveries.push(...deliveries);
+    console.log(`[Bosta] Progress: ${allDeliveries.length}/${total || "?"}`);
 
-    if (batch.length < 100) break;
+    if (deliveries.length < BOSTA_PAGE_SIZE) break;
 
     page++;
   }
 
   console.log(
-    `[Bosta] Total deliveries across ${page + 1} page(s): ${allDeliveries.length}`,
+    `[Bosta] Total deliveries across ${page} page(s): ${allDeliveries.length}`,
   );
   return allDeliveries;
 }
@@ -278,8 +277,11 @@ Deno.serve(async (req) => {
 
     console.log(`[Start] Check ${check}`);
 
-    // Fetch ALL orders (no date filter) - we want all outstanding orders
-    const allOrders = await searchBostaAllPages({});
+    const allOrders = await searchBostaAllPages({
+      dateRangeStart:  cairoDateString(-7),
+      dateRangeEnd:    cairoDateString(0),
+      dateRangeStates: "10,21,25,45F,45CC,46C,46E,46S,46PC,46R,60,100,101",
+    });
 
     if (allOrders.length === 0) {
       console.warn("[Warning] No orders found. API may be unreachable.");
@@ -334,14 +336,14 @@ Deno.serve(async (req) => {
     if (check === 1) {
       lines.push(`📦 Total orders: <b>${allOrders.length}</b>`);
       lines.push(`✅ Delivered: <b>${delivered.length}</b>`);
-      lines.push(`🚚 Out for delivery: <b>${active.length}</b>`);
+      lines.push(`🚚 Active: <b>${active.length}</b>`);
       lines.push(`⚡ Exceptions: <b>${exceptions.length}</b>`);
       lines.push(`❌ Problematic: <b>${problematic.length}</b>`);
 
-      if (problematic.length > 0) {
+      if (outstanding.length > 0) {
         lines.push("");
-        lines.push(`<b>🚨 Needs attention (${problematic.length}):</b>`);
-        for (const { tn, d } of problematic) {
+        lines.push(`<b>⏳ Outstanding orders (${outstanding.length}):</b>`);
+        for (const { tn, d } of outstanding) {
           lines.push(""); lines.push(formatOrderBlock(tn, d));
         }
       }
@@ -349,33 +351,16 @@ Deno.serve(async (req) => {
       lines.push(`📦 Active orders: <b>${active.length}</b>`);
       lines.push(`✅ Delivered: <b>${delivered.length}</b>`);
       lines.push(`⚡ Exceptions: <b>${exceptions.length}</b>`);
-
-      if (active.length > 0) {
-        lines.push("");
-        lines.push(`<b>Active orders (${active.length}):</b>`);
-        for (const { tn, d } of active) {
-          lines.push(""); lines.push(formatOrderBlock(tn, d));
-        }
+      lines.push(`❌ Problematic: <b>${problematic.length}</b>`);
+      if (multiAttempt.length > 0) {
+        lines.push(`⚠️ Multi-attempt: <b>${multiAttempt.length}</b>`);
       }
     } else if (check === 3) {
       lines.push(`✅ Delivered: <b>${delivered.length}</b>`);
       lines.push(`📦 Still outstanding: <b>${outstanding.length}</b>`);
       lines.push(`⚡ Exceptions: <b>${exceptions.length}</b>`);
-
       if (multiAttempt.length > 0) {
-        lines.push("");
-        lines.push(`<b>⚠️ Multi-attempt orders (${multiAttempt.length}):</b>`);
-        for (const { tn, d } of multiAttempt) {
-          lines.push(""); lines.push(formatOrderBlock(tn, d));
-        }
-      }
-
-      if (exceptions.length > 0) {
-        lines.push("");
-        lines.push(`<b>Exceptions (${exceptions.length}):</b>`);
-        for (const { tn, d } of exceptions) {
-          lines.push(""); lines.push(formatOrderBlock(tn, d));
-        }
+        lines.push(`⚠️ Multi-attempt: <b>${multiAttempt.length}</b>`);
       }
     } else {
       const totalResolved =

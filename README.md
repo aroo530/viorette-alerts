@@ -39,10 +39,10 @@ The `alerts` table acts as an audit queue — every event is persisted with its 
 
 | Check | Cairo | UTC | Content |
 |-------|-------|-----|---------|
-| 1 — Morning | 10:00 | 08:00 | Full totals + problematic orders |
-| 2 — Midday | 12:30 | 10:30 | Active orders with full detail blocks |
-| 3 — Afternoon | 15:00 | 13:00 | Multi-attempt & exception orders |
-| 4 — End of Day | 17:00 | 15:00 | Daily summary + all outstanding orders |
+| 1 — Morning | 10:00 | 08:00 | Totals + all outstanding order blocks |
+| 2 — Midday | 12:30 | 10:30 | Counts only (active, delivered, exceptions, multi-attempt) |
+| 3 — Afternoon | 15:00 | 13:00 | Counts only (outstanding, exceptions, multi-attempt) |
+| 4 — End of Day | 17:00 | 15:00 | Daily summary + all outstanding order blocks |
 
 Each outstanding order renders as a multi-line block:
 

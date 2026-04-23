@@ -35,6 +35,16 @@ const SEVERITY_EMOJI: Record<Severity, string> = {
   info:     '⚪ INFO',
 }
 
+// Exception codes that warrant a Telegram alert
+const ALERT_EXCEPTION_CODES = new Set([1, 2, 3, 6, 7, 8, 14])
+// Non-exception states that always alert
+const ALERT_STATES = new Set([49, 103])
+
+function shouldAlert(payload: BostaPayload): boolean {
+  if (payload.state === 47) return ALERT_EXCEPTION_CODES.has(payload.exceptionCode ?? -1)
+  return ALERT_STATES.has(payload.state)
+}
+
 // Exception code → severity + label
 function classifyException(code?: number): { severity: Severity; label: string } {
   if (code == null) return { severity: 'medium', label: 'Unknown exception' }
@@ -154,13 +164,14 @@ Deno.serve(async (req) => {
   try {
     const payload: BostaPayload = await req.json()
     const { eventType, severity, message } = buildAlert(payload)
+    const alert = shouldAlert(payload)
 
     const severityLabel = SEVERITY_EMOJI[severity]
     const fullMessage = `${severityLabel} | ${message}`
 
     const [supabase, orderDetails] = await Promise.all([
       Promise.resolve(createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)),
-      fetchOrderDetails(payload.trackingNumber),
+      alert ? fetchOrderDetails(payload.trackingNumber) : Promise.resolve(null),
     ])
 
     const { data: inserted, error } = await supabase
@@ -171,7 +182,7 @@ Deno.serve(async (req) => {
         metric_name:   'shipment_state',
         metric_value:  payload.state,
         message:       fullMessage,
-        status:        'pending',
+        status:        alert ? 'pending' : 'stored',
         raw_payload:   payload,
         order_details: orderDetails,
       })

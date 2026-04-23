@@ -171,7 +171,7 @@ Deno.serve(async (req) => {
 
     const [supabase, orderDetails] = await Promise.all([
       Promise.resolve(createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)),
-      alert ? fetchOrderDetails(payload.trackingNumber) : Promise.resolve(null),
+      fetchOrderDetails(payload.trackingNumber),
     ])
 
     const { data: inserted, error } = await supabase

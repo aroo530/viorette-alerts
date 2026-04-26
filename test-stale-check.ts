@@ -380,7 +380,7 @@ for (const d of activeOrders) {
 
 console.log(`\n═══════════════════════════════════════════════════════════`);
 console.log(
-  `[Summary] Checked: ${activeOrders.length - skipped}  Skipped (created today): ${skipped}  Stale: ${stale.length}`,
+  `[Summary] Found: ${activeOrders.length}  Evaluated: ${activeOrders.length - skipped}  Skipped (today): ${skipped}  Stale: ${stale.length}`,
 );
 
 if (stale.length === 0) {

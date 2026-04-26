@@ -233,8 +233,6 @@ Deno.serve(async (req) => {
     console.log(`[Watch] ${flagged.length} flagged (${critCount} critical)`);
 
     if (flagged.length === 0) {
-      const okMsg = `<b>✅ Order Watch · ${timeStr}</b>\n<i>All ${orders.length} active order${orders.length !== 1 ? "s" : ""} are on track — no delays detected.</i>`;
-      await sendTelegramMessage(okMsg);
       return new Response(JSON.stringify({ ok: true, flagged: 0, checked: orders.length }), { status: 200 });
     }
 

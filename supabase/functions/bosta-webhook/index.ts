@@ -35,14 +35,10 @@ const SEVERITY_EMOJI: Record<Severity, string> = {
   info: "⚪ INFO",
 };
 
-// Exception codes that warrant a Telegram alert
-const ALERT_EXCEPTION_CODES = new Set([1, 2, 3, 6, 7, 8, 14]);
 // Non-exception states that always alert
-const ALERT_STATES = new Set([49, 103]);
+const ALERT_STATES = new Set([46, 47, 48, 49, 100, 101, 102, 103, 105]);
 
 function shouldAlert(payload: BostaPayload): boolean {
-  if (payload.state === 47)
-    return ALERT_EXCEPTION_CODES.has(payload.exceptionCode ?? -1);
   return ALERT_STATES.has(payload.state);
 }
 
@@ -318,7 +314,7 @@ Deno.serve(async (req) => {
     );
   } catch (err) {
     console.error("bosta-webhook error:", err);
-    return new Response(JSON.stringify({ error: err.message }), {
+    return new Response(JSON.stringify({ error: (err as Error).message }), {
       status: 500,
       headers: { "Content-Type": "application/json" },
     });

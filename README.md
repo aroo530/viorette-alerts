@@ -10,7 +10,7 @@ Built on **Supabase Edge Functions** (Deno) with **pg_cron** for scheduled repor
 
 ### Bosta shipment tracking
 - **Webhook listener** (`bosta-webhook`) — receives every state change from Bosta, classifies it by severity, and stores it in the `alerts` table
-- **Daily report** (`bosta-daily-report`) — pulls all active orders directly from the Bosta API 4× a day and sends a formatted summary to Telegram, so you get the full picture even if a webhook was missed
+- **Stale order check** (`bosta-stale-check`) — pulls all active orders directly from the Bosta API hourly (12:00–18:00 Cairo) and alerts Telegram if any order hasn't received an update from Bosta today, ensuring no shipments get stuck
 
 ### Meta Ads monitoring
 - **Poller** (`meta-poller`) — checks today's CPC, CPM, CTR, ROAS, and daily spend against configurable thresholds and fires alerts when any threshold is breached
@@ -28,23 +28,18 @@ Bosta webhooks ──► bosta-webhook ──► alerts table ──► dispatch
 Meta Ads API ────► meta-poller ───► alerts table ──► dispatch-alert ──► Email
                                                                       ──► Slack
 
-pg_cron (4×/day) ► bosta-daily-report ──────────────────────────────► Telegram
+pg_cron (hourly) ► bosta-stale-check ───────────────────────────────► Telegram
 ```
 
 The `alerts` table acts as an audit queue — every event is persisted with its raw payload, dispatch status per channel, and a full `alert_logs` trail.
 
 ---
 
-## Daily report schedule (Cairo time, UTC+2)
+## Stale check schedule (Cairo time, UTC+2)
 
-| Check | Cairo | UTC | Content |
-|-------|-------|-----|---------|
-| 1 — Morning | 10:00 | 08:00 | Totals + all outstanding order blocks |
-| 2 — Midday | 12:30 | 10:30 | Counts only (active, delivered, exceptions, multi-attempt) |
-| 3 — Afternoon | 15:00 | 13:00 | Counts only (outstanding, exceptions, multi-attempt) |
-| 4 — End of Day | 17:00 | 15:00 | Daily summary + all outstanding order blocks |
+The `bosta-stale-check` cron job runs **hourly between 12:00 and 18:00 Cairo time** (10:00–16:00 UTC).
 
-Each outstanding order renders as a multi-line block:
+It flags any active order that hasn't had an internal update ("star action") logged by Bosta today. Stale orders render as a multi-line block in Telegram:
 
 ```
 #74307963 — Customer Name
@@ -52,10 +47,11 @@ Each outstanding order renders as a multi-line block:
 ↩️ Return to Origin  ·  Received at warehouse  ·  1 attempt(s)
 ⚠️ Customer refused delivery
 🔔 Waiting for your action
-📅 Next: 22 Apr
-💰 COD: 450 EGP
+🕒 Last update: 22 Apr
 🔖 #ORDER-REF
 ```
+
+If no orders are stale, it sends a brief "All up to date" confirmation message.
 
 ---
 
@@ -65,7 +61,7 @@ Each outstanding order renders as a multi-line block:
 supabase/
 ├── functions/
 │   ├── bosta-webhook/        # Receives Bosta state-change events
-│   ├── bosta-daily-report/   # 4× daily order report → Telegram
+│   ├── bosta-stale-check/    # Hourly stale order check → Telegram
 │   ├── dispatch-alert/       # Fans out pending alerts to all channels
 │   └── meta-poller/          # Polls Meta Ads API for threshold breaches
 └── migrations/
@@ -76,7 +72,11 @@ supabase/
     ├── 20260421080325_fix_trigger_use_vault.sql
     ├── 20260421081027_add_telegram_columns.sql
     ├── 20260421084012_add_order_details_column.sql
-    └── 20260421090000_schedule_daily_reports.sql
+    ├── 20260421090000_schedule_daily_reports.sql
+    ├── 20260421100000_replace_crons_with_stale_check.sql
+    ├── 20260422100000_update_stale_check_schedule.sql
+    ├── 20260422110000_trigger_skip_stored_alerts.sql
+    └── 20260423100000_create_cron_runs_table.sql
 ```
 
 ---
@@ -116,7 +116,7 @@ supabase secrets set \
 
 ### 3. Store Vault secrets for pg_cron
 
-The daily report cron jobs read `project_url` and `service_role_key` from Supabase Vault. Add them via the Supabase dashboard under **Settings → Vault**, or with SQL:
+The stale check cron job reads `project_url` and `service_role_key` from Supabase Vault. Add them via the Supabase dashboard under **Settings → Vault**, or with SQL:
 
 ```sql
 select vault.create_secret('https://<ref>.supabase.co', 'project_url');
@@ -129,13 +129,13 @@ select vault.create_secret('<service-role-key>', 'service_role_key');
 supabase db push
 ```
 
-This creates the `alerts` and `alert_logs` tables, sets up the dispatch trigger, enables `pg_net`, and schedules the 4 daily cron jobs.
+This creates the `alerts` and `alert_logs` tables, sets up the dispatch trigger, enables `pg_net`, and schedules the hourly stale check cron job.
 
 ### 5. Deploy functions
 
 ```bash
 supabase functions deploy bosta-webhook
-supabase functions deploy bosta-daily-report
+supabase functions deploy bosta-stale-check
 supabase functions deploy dispatch-alert
 supabase functions deploy meta-poller
 ```
@@ -152,10 +152,10 @@ https://<your-project-ref>.supabase.co/functions/v1/bosta-webhook
 
 ## Testing
 
-Trigger a manual report (check 4 = end-of-day summary):
+Trigger a manual stale check:
 
 ```bash
-supabase functions invoke bosta-daily-report --data '{"check":4}'
+supabase functions invoke bosta-stale-check --data '{}'
 ```
 
 Trigger the Meta poller:
@@ -176,9 +176,9 @@ select jobname, schedule, active from cron.job;
 
 | Variable | Used by | Description |
 |----------|---------|-------------|
-| `BOSTA_API_KEY` | webhook, daily-report | Bosta API key |
-| `TELEGRAM_BOT_TOKEN` | daily-report, dispatch | Telegram bot token |
-| `TELEGRAM_CHAT_ID` | daily-report, dispatch | Target chat or group ID |
+| `BOSTA_API_KEY` | webhook, stale-check | Bosta API key |
+| `TELEGRAM_BOT_TOKEN` | stale-check, dispatch | Telegram bot token |
+| `TELEGRAM_CHAT_ID` | stale-check, dispatch | Target chat or group ID |
 | `TWILIO_SID` | dispatch | Twilio account SID |
 | `TWILIO_AUTH_TOKEN` | dispatch | Twilio auth token |
 | `TWILIO_PHONE` | dispatch | Twilio WhatsApp sender number |

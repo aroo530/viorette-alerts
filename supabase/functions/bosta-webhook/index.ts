@@ -241,12 +241,34 @@ async function fetchOrderDetails(trackingNumber: string | number) {
   try {
     const res = await fetch(
       `https://app.bosta.co/api/v0/deliveries/${trackingNumber}`,
-      {
-        headers: { Authorization: `${BOSTA_API_KEY}` },
-      },
+      { headers: { Authorization: `${BOSTA_API_KEY}` } },
     );
     if (!res.ok) return null;
-    return await res.json();
+    const d = await res.json();
+    const lastException = d.exceptionLog?.at(-1) ?? d.exception ?? null;
+    return {
+      bosta_id:              d._id,
+      tracking_number:       d.trackingNumber,
+      business_reference:    d.businessReference,
+      state_code:            d.state?.code,
+      state_value:           d.state?.value,
+      type_code:             d.type?.code,
+      type_value:            d.type?.value,
+      cod:                   d.cod,
+      shipment_fees:         d.shipmentFees,
+      attempts_count:        d.attemptsCount,
+      last_exception_code:   lastException?.code ?? null,
+      last_exception_reason: lastException?.reason ?? null,
+      receiver_name:         d.receiver?.fullName,
+      receiver_phone:        d.receiver?.phone,
+      weight:                d.specs?.weight,
+      package_type:          d.specs?.packageType,
+      items_count:           d.specs?.packageDetails?.itemsCount,
+      scheduled_at:          d.scheduledAt,
+      collected_at:          d.collectedFromConsignee,
+      created_at:            d.createdAt,
+      updated_at:            d.updatedAt,
+    };
   } catch {
     return null;
   }
@@ -268,11 +290,9 @@ Deno.serve(async (req) => {
     const severityLabel = SEVERITY_EMOJI[severity];
     const fullMessage = `${severityLabel} | ${message}`;
 
-    const [supabase, orderDetails] = await Promise.all([
-      Promise.resolve(createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)),
-      fetchOrderDetails(payload.trackingNumber),
-    ]);
+    const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
+    // Insert immediately so nothing is dropped — dispatch is held until enrichment
     const { data: inserted, error } = await supabase
       .from("alerts")
       .insert({
@@ -281,27 +301,43 @@ Deno.serve(async (req) => {
         metric_name: "shipment_state",
         metric_value: payload.state,
         message: fullMessage,
-        status: alert ? "pending" : "stored",
+        status: alert ? "enriching" : "stored",
         raw_payload: payload,
-        order_details: orderDetails,
       })
       .select("id")
       .single();
 
     if (error) throw error;
 
-    await supabase.from("alert_logs").insert({
-      alert_id: inserted.id,
-      action: "received",
-      channel: null,
-      details: {
-        source: "bosta_webhook",
-        tracking_number: payload.trackingNumber,
-        state: payload.state,
-        severity,
-        exception_code: payload.exceptionCode ?? null,
-      },
-    });
+    // Respond to Bosta immediately — enrichment runs in the background
+    EdgeRuntime.waitUntil(
+      (async () => {
+        const [orderDetails] = await Promise.all([
+          fetchOrderDetails(payload.trackingNumber),
+          supabase.from("alert_logs").insert({
+            alert_id: inserted.id,
+            action: "received",
+            channel: null,
+            details: {
+              source: "bosta_webhook",
+              tracking_number: payload.trackingNumber,
+              state: payload.state,
+              severity,
+              exception_code: payload.exceptionCode ?? null,
+            },
+          }),
+        ]);
+
+        // Flip to pending — this UPDATE fires the dispatch trigger
+        await supabase
+          .from("alerts")
+          .update({
+            order_details: orderDetails,
+            status: alert ? "pending" : "stored",
+          })
+          .eq("id", inserted.id);
+      })()
+    );
 
     return new Response(
       JSON.stringify({

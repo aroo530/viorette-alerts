@@ -18,18 +18,27 @@ const TELEGRAM_BOT_TOKEN = Deno.env.get("TELEGRAM_BOT_TOKEN")!;
 const TELEGRAM_CHAT_ID = Deno.env.get("TELEGRAM_CHAT_ID")!;
 
 interface BostaOrder {
-  receiver?: {
-    fullName?: string;
-    firstName?: string;
-    lastName?: string;
-    phone?: string;
-  };
-  dropOffAddress?: { firstLine?: string; city?: { name?: string } };
-  businessReference?: string;
+  bosta_id?: string;
+  tracking_number?: string | number;
+  business_reference?: string;
+  state_code?: number;
+  state_value?: string;
+  type_code?: number;
+  type_value?: string;
   cod?: number;
-  deliveryAttemptsLength?: number;
-  specs?: { packageType?: string; packageDetails?: { itemsCount?: number } };
-  state?: { value?: string; code?: number };
+  shipment_fees?: number;
+  attempts_count?: number;
+  last_exception_code?: number;
+  last_exception_reason?: string;
+  receiver_name?: string;
+  receiver_phone?: string;
+  weight?: number;
+  package_type?: string;
+  items_count?: number;
+  scheduled_at?: string;
+  collected_at?: string;
+  created_at?: string;
+  updated_at?: string;
 }
 
 interface Alert {
@@ -194,38 +203,22 @@ function formatTelegramMessage(
   const lines = [`${severityPart}  ·  <b>${title}</b>`, "", body];
 
   if (order) {
-    const name =
-      order.receiver?.fullName ||
-      [order.receiver?.firstName, order.receiver?.lastName]
-        .filter(Boolean)
-        .join(" ");
-    const phone = order.receiver?.phone;
-    const addr = [
-      order.dropOffAddress?.firstLine,
-      order.dropOffAddress?.city?.name,
-    ]
-      .filter(Boolean)
-      .join(" — ");
-    const ref = order.businessReference;
-    const cod = order.cod;
-    const attempts = order.deliveryAttemptsLength;
     const pkg = [
-      order.specs?.packageDetails?.itemsCount != null
-        ? `${order.specs.packageDetails.itemsCount} item(s)`
-        : null,
-      order.specs?.packageType,
+      order.items_count != null ? `${order.items_count} item(s)` : null,
+      order.package_type,
     ]
       .filter(Boolean)
       .join(" · ");
 
     lines.push("");
-    if (name) lines.push(`👤 ${name}`);
-    if (phone) lines.push(`📞 ${phone}`);
-    if (addr) lines.push(`📍 ${addr}`);
-    if (ref) lines.push(`🔖 ${ref}`);
-    if (cod != null) lines.push(`💰 COD: ${cod} EGP`);
-    if (pkg) lines.push(`📦 ${pkg}`);
-    if (attempts != null) lines.push(`🔄 Attempts: ${attempts}`);
+    if (order.receiver_name)  lines.push(`👤 ${order.receiver_name}`);
+    if (order.receiver_phone) lines.push(`📞 ${order.receiver_phone}`);
+    if (order.business_reference) lines.push(`🔖 ${order.business_reference}`);
+    if (order.cod != null)    lines.push(`💰 COD: ${order.cod} EGP`);
+    if (order.shipment_fees != null) lines.push(`🧾 Fees: ${order.shipment_fees} EGP`);
+    if (pkg)                  lines.push(`📦 ${pkg}`);
+    if (order.attempts_count != null) lines.push(`🔄 Attempts: ${order.attempts_count}`);
+    if (order.last_exception_reason) lines.push(`⚠️ ${order.last_exception_reason}`);
   }
 
   lines.push("", `<i>🕐 ${timestamp}</i>`);

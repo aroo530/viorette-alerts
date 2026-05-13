@@ -7,8 +7,18 @@ const BOSTA_API_KEY = Deno.env.get("BOSTA_API_KEY")!;
 const BOSTA_PAGE_SIZE = 50;
 const BOSTA_RATE_LIMIT_MS = 150;
 
-// Same alertable states as bosta-webhook
-const ALERT_STATES = [46, 47, 48, 49, 100, 101, 102, 103, 105];
+const ALERT_STATES = [47, 48, 49, 100, 101, 102, 103, 105];
+
+const STATE_LABELS: Record<number, string> = {
+  47: "Exception",
+  48: "Terminated",
+  49: "Canceled",
+  100: "Lost",
+  101: "Damaged",
+  102: "Under investigation",
+  103: "Awaiting your action",
+  105: "On hold",
+};
 
 interface BostaException {
   reason?: string;
@@ -206,8 +216,8 @@ Deno.serve(async (req) => {
         continue;
       }
 
-      const stateVal = d.state?.value ?? `State ${d.state?.code ?? "?"}`;
-      const message = `🔴 CRITICAL | Webhook missed for #${tn} — order is in state "${stateVal}" but no alert was received.`;
+      const stateLabel = STATE_LABELS[stateCode] ?? `State ${stateCode}`;
+      const message = `🔴 CRITICAL | Webhook missed for #${tn} — order is in state "${stateLabel}" but no alert was received.`;
 
       const { error: insertErr } = await supabase.from("alerts").insert({
         source: "bosta",

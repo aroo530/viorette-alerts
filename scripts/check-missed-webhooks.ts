@@ -6,7 +6,7 @@ const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 
 const BOSTA_PAGE_SIZE = 50;
 const BOSTA_RATE_LIMIT_MS = 150;
-const ALERT_STATES = [46, 47, 48, 49, 100, 101, 102, 103, 105];
+const ALERT_STATES = [47, 48, 49, 100, 101, 102, 103, 105];
 
 function sleep(ms: number) {
   return new Promise((r) => setTimeout(r, ms));
@@ -121,6 +121,8 @@ let alerted = 0;
 for (const d of allOrders) {
   const tn = String(d.trackingNumber);
   const stateCode = d.state?.code;
+
+  console.error(`[order] #${tn} raw state: ${JSON.stringify(d.state)} → stateCode=${stateCode} alertable=${stateCode != null && ALERT_STATES.includes(stateCode)}`);
 
   const { data: orderRow, error: upsertErr } = await supabase
     .from("bosta_orders")

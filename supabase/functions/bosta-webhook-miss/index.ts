@@ -64,8 +64,8 @@ async function searchBosta(
         limit: BOSTA_PAGE_SIZE,
         page,
         sortBy: "-updatedAt",
-        confirmedAtStart: cairoDateString(-14),
-        confirmedAtEnd: cairoDateString(0),
+        dateRangeStart: cairoDateString(-14),
+        dateRangeEnd: cairoDateString(0),
       }),
     });
 
@@ -104,6 +104,12 @@ async function fetchAllOrders(): Promise<BostaDelivery[]> {
   return all;
 }
 
+function toISO(val: string | null | undefined): string | null {
+  if (!val) return null;
+  const d = new Date(val);
+  return isNaN(d.getTime()) ? null : d.toISOString();
+}
+
 function buildOrderRow(d: BostaDelivery) {
   const log = d.exceptionLog;
   const lastException = (log && log.length > 0 ? log[log.length - 1] : null) ?? d.exception ?? null;
@@ -123,10 +129,10 @@ function buildOrderRow(d: BostaDelivery) {
     weight:                d.specs?.weight ?? null,
     package_type:          d.specs?.packageType ?? null,
     items_count:           d.specs?.packageDetails?.itemsCount ?? null,
-    scheduled_at:          d.scheduledAt ?? null,
-    collected_at:          d.collectedFromConsignee ?? null,
-    bosta_created_at:      d.createdAt ?? null,
-    bosta_updated_at:      d.updatedAt ?? null,
+    scheduled_at:          toISO(d.scheduledAt),
+    collected_at:          toISO(d.collectedFromConsignee),
+    bosta_created_at:      toISO(d.createdAt),
+    bosta_updated_at:      toISO(d.updatedAt),
     synced_at:             new Date().toISOString(),
   };
 }

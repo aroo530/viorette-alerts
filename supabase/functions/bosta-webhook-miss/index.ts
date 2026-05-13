@@ -172,38 +172,37 @@ Deno.serve(async (req) => {
       synced++;
       const orderId = orderRow.id;
 
-      // Only run alert logic for alertable states
-      if (!ALERT_STATES.includes(stateCode as number)) continue;
+      // Only run alert logic for alertable states; skip undefined or non-alertable
+      if (stateCode == null || !ALERT_STATES.includes(stateCode)) continue;
 
-      // Check if a real (non-missed) webhook alert already exists for this order
+      // Has a real webhook already fired for this order in this exact state?
       const { data: realAlert } = await supabase
         .from("alerts")
         .select("id")
         .eq("order_id", orderId)
+        .eq("metric_value", stateCode)
         .neq("event_type", "webhook_missed")
         .neq("status", "stored")
         .limit(1)
         .maybeSingle();
 
-      if (realAlert) {
-        // Webhook fired correctly — nothing to do
-        continue;
-      }
+      if (realAlert) continue;
 
       missed++;
 
-      // Check if we already created a webhook_missed alert for this order in the last 24h
+      // Have we already created a webhook_missed alert for this order+state in the last 24h?
       const { data: recentMiss } = await supabase
         .from("alerts")
         .select("id")
         .eq("order_id", orderId)
         .eq("event_type", "webhook_missed")
+        .eq("metric_value", stateCode)
         .gte("created_at", new Date(Date.now() - 24 * 3600 * 1000).toISOString())
         .limit(1)
         .maybeSingle();
 
       if (recentMiss) {
-        console.log(`[webhook-miss] Already alerted for ${tn} within 24h — skipping`);
+        console.log(`[webhook-miss] Already alerted for ${tn} state ${stateCode} within 24h — skipping`);
         continue;
       }
 

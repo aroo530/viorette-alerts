@@ -64,8 +64,8 @@ async function searchBosta(
         limit: BOSTA_PAGE_SIZE,
         page,
         sortBy: "-updatedAt",
-        dateRangeStart: cairoDateString(-14),
-        dateRangeEnd: cairoDateString(0),
+        confirmedAtStart: cairoDateString(-14),
+        confirmedAtEnd: cairoDateString(0),
       }),
     });
 

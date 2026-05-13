@@ -151,7 +151,7 @@ Deno.serve(async (req) => {
       const tn = String(d.trackingNumber);
       const stateCode = d.state?.code;
 
-      // Upsert every order into bosta_orders for a complete record
+      // Upsert every order — insert new, update existing
       const { data: orderRow, error: upsertErr } = await supabase
         .from("bosta_orders")
         .upsert(buildOrderRow(d), { onConflict: "bosta_id", ignoreDuplicates: false })

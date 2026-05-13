@@ -250,8 +250,6 @@ async function fetchOrderDetails(trackingNumber: string | number) {
       bosta_id:              d._id,
       tracking_number:       d.trackingNumber,
       business_reference:    d.businessReference,
-      state_code:            d.state?.code,
-      state_value:           d.state?.value,
       type_code:             d.type?.code,
       type_value:            d.type?.value,
       cod:                   d.cod,
@@ -328,11 +326,45 @@ Deno.serve(async (req) => {
           }),
         ]);
 
+        let orderId: string | null = null;
+        if (orderDetails?.bosta_id) {
+          const { data: orderRow } = await supabase
+            .from("bosta_orders")
+            .upsert(
+              {
+                bosta_id:              orderDetails.bosta_id,
+                tracking_number:       String(orderDetails.tracking_number ?? payload.trackingNumber),
+                business_reference:    orderDetails.business_reference ?? null,
+                type_code:             orderDetails.type_code ?? null,
+                type_value:            orderDetails.type_value ?? null,
+                cod:                   orderDetails.cod ?? null,
+                shipment_fees:         orderDetails.shipment_fees ?? null,
+                attempts_count:        orderDetails.attempts_count ?? null,
+                last_exception_code:   orderDetails.last_exception_code ?? null,
+                last_exception_reason: orderDetails.last_exception_reason ?? null,
+                receiver_name:         orderDetails.receiver_name ?? null,
+                receiver_phone:        orderDetails.receiver_phone ?? null,
+                weight:                orderDetails.weight ?? null,
+                package_type:          orderDetails.package_type ?? null,
+                items_count:           orderDetails.items_count ?? null,
+                scheduled_at:          orderDetails.scheduled_at ?? null,
+                collected_at:          orderDetails.collected_at ?? null,
+                bosta_created_at:      orderDetails.created_at ?? null,
+                bosta_updated_at:      orderDetails.updated_at ?? null,
+                synced_at:             new Date().toISOString(),
+              },
+              { onConflict: "bosta_id", ignoreDuplicates: false }
+            )
+            .select("id")
+            .single();
+          orderId = orderRow?.id ?? null;
+        }
+
         // Flip to pending — this UPDATE fires the dispatch trigger
         await supabase
           .from("alerts")
           .update({
-            order_details: orderDetails,
+            order_id: orderId,
             status: alert ? "pending" : "stored",
           })
           .eq("id", inserted.id);

@@ -21,8 +21,6 @@ interface BostaOrder {
   bosta_id?: string;
   tracking_number?: string | number;
   business_reference?: string;
-  state_code?: number;
-  state_value?: string;
   type_code?: number;
   type_value?: string;
   cod?: number;
@@ -35,10 +33,6 @@ interface BostaOrder {
   weight?: number;
   package_type?: string;
   items_count?: number;
-  scheduled_at?: string;
-  collected_at?: string;
-  created_at?: string;
-  updated_at?: string;
 }
 
 interface Alert {
@@ -47,8 +41,9 @@ interface Alert {
   event_type: string;
   message: string;
   created_at: string;
+  order_id?: string | null;
   raw_payload?: { trackingNumber?: string | number; [key: string]: unknown };
-  order_details?: BostaOrder;
+  bosta_orders?: BostaOrder | null;
 }
 
 Deno.serve(async (req) => {
@@ -63,7 +58,7 @@ Deno.serve(async (req) => {
   const body = await req.json().catch(() => ({}));
   const alertId: string | undefined = body.alert_id;
 
-  const query = supabase.from("alerts").select("*").eq("status", "pending");
+  const query = supabase.from("alerts").select("*, bosta_orders(*)").eq("status", "pending");
   const { data: alerts, error: fetchError } = alertId
     ? await query.eq("id", alertId).limit(1)
     : await query.limit(10);
@@ -227,7 +222,7 @@ function formatTelegramMessage(
 
 async function sendTelegram(alert: Alert): Promise<void> {
   const trackingNumber = alert.raw_payload?.trackingNumber;
-  const order = alert.order_details;
+  const order = alert.bosta_orders ?? null;
 
   const payload: Record<string, unknown> = {
     chat_id: TELEGRAM_CHAT_ID,

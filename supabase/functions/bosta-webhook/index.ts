@@ -378,10 +378,10 @@ Deno.serve(async (req)=>{
         }).select("id").single();
         orderId = orderRow?.id ?? null;
       }
-      // Flip to pending — this UPDATE fires the dispatch trigger
+      // Always write order_id; flip status to pending only for alertable events
       await supabase.from("alerts").update({
         order_id: orderId,
-        status: alert ? "pending" : "stored"
+        ...(alert ? { status: "pending" } : {}),
       }).eq("id", inserted.id);
     })());
     return new Response(JSON.stringify({
